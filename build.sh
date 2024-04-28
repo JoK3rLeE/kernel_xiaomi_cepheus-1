@@ -9,23 +9,35 @@ restore='\033[0m'
 clear
 
 # Resources
-export CLANG_PATH=/home/mihau/mykernel/azure-clang-main/bin
+export CLANG_PATH=~/tc/neutron-clang/bin
 export PATH=${CLANG_PATH}:${PATH}
-export CROSS_COMPILE=${CLANG_PATH}/aarch64-linux-gnu-
-export CROSS_COMPILE_ARM32=${CLANG_PATH}/arm-linux-gnueabi-
-DEFCONFIG="cepheus_defconfig"
+export THINLTO_CACHE=~/ltocache/
+DEFCONFIG="raphael_defconfig"
 
 # Kernel Details
-VER=""
+REV="R6.2"
+
+EDITION="BLACK"
+VER="$EDITION"-"$REV"
+
+# Vars
+BASE_AK_VER="SOVIET-"
+DATE=`date +"%Y%m%d-%H%M"`
+AK_VER="$BASE_AK_VER$VER"
+ZIP_NAME="$AK_VER"-"$DATE"
+export ARCH=arm64
+export SUBARCH=arm64
+export KBUILD_BUILD_USER=NATO66613
+export KBUILD_BUILD_HOST=KREMLIN
 
 # Paths
 KERNEL_DIR=`pwd`
-REPACK_DIR=/home/mihau/mykernel/AnyKernel3
-ZIP_MOVE=/home/mihau/mykernel
+REPACK_DIR=~/AnyKernel3
+ZIP_MOVE=~/AK-releases
 
 # Functions
 function clean_all {
-		rm -rf $REPACK_DIR/Image*
+		rm -rf $REPACK_DIR/Image* $REPACK_DIR/dtbo.img
 		cd $KERNEL_DIR
 		echo
 		make clean && make mrproper
@@ -33,47 +45,27 @@ function clean_all {
 
 function make_kernel {
 		echo
-		make CC=clang AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip $DEFCONFIG
-		make CC=clang AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip -j$(grep -c ^processor /proc/cpuinfo)
+		make LLVM=1 LLVM_IAS=1 CC="ccache clang" $DEFCONFIG
+		make LLVM=1 LLVM_IAS=1 CC="ccache clang" -j$(grep -c ^processor /proc/cpuinfo)
 
 }
-
-
-function make_boot {
-		cp out/arch/arm64/boot/Image.gz-dtb $REPACK_DIR
-}
-
 
 function make_zip {
+                cp out/arch/arm64/boot/Image.gz-dtb $REPACK_DIR
+                cp out/arch/arm64/boot/dtbo.img $REPACK_DIR
 		cd $REPACK_DIR
 		zip -r9 `echo $ZIP_NAME`.zip *
 		mv  `echo $ZIP_NAME`*.zip $ZIP_MOVE
 		cd $KERNEL_DIR
 }
 
-
 DATE_START=$(date +"%s")
-
 
 echo -e "${green}"
 echo "-----------------"
 echo "Making Kernel:"
 echo "-----------------"
 echo -e "${restore}"
-
-
-# Vars
-BASE_AK_VER="POST-SOVIET-MI9-"
-DATE=`date +"%Y%m%d-%H%M"`
-AK_VER="$BASE_AK_VER$VER"
-ZIP_NAME="$AK_VER"-"$DATE"
-#export LOCALVERSION=~`echo $AK_VER`
-#export LOCALVERSION=~`echo $AK_VER`
-export ARCH=arm64
-export SUBARCH=arm64
-export KBUILD_BUILD_USER=Mihau
-export KBUILD_BUILD_HOST=Mihau
-
 echo
 
 while read -p "Do you want to clean stuffs (y/n)? " cchoice
@@ -103,7 +95,6 @@ do
 case "$dchoice" in
 	y|Y )
 		make_kernel
-		make_boot
                 make_zip
 		break
 		;;
@@ -117,7 +108,6 @@ case "$dchoice" in
 		;;
 esac
 done
-
 
 echo -e "${green}"
 echo "-------------------"

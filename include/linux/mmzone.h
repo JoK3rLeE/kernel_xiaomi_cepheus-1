@@ -36,8 +36,6 @@
  */
 #define PAGE_ALLOC_COSTLY_ORDER 3
 
-#define MAX_KSWAPD_THREADS 8
-
 enum migratetype {
 	MIGRATE_UNMOVABLE,
 	MIGRATE_MOVABLE,
@@ -384,17 +382,17 @@ enum {
 struct lru_gen_mm_state {
 	/* set to max_seq after each iteration */
 	unsigned long seq;
-	/* where the current iteration starts (inclusive) */
+	/* where the current iteration continues after */
 	struct list_head *head;
-	/* where the last iteration ends (exclusive) */
+	/* where the last iteration ended before */
 	struct list_head *tail;
-	/* to wait for the last page table walker to finish */
+	/* Unused - keep for ABI compatiiblity */
 	struct wait_queue_head wait;
 	/* Bloom filters flip after each iteration */
 	unsigned long *filters[NR_BLOOM_FILTERS];
 	/* the mm stats for debugging */
 	unsigned long stats[NR_HIST_GENS][NR_MM_STATS];
-	/* the number of concurrent page table walkers */
+	/* Unused - keep for ABI compatiiblity */
 	int nr_walkers;
 };
 
@@ -891,17 +889,15 @@ typedef struct pglist_data {
 	int node_id;
 	wait_queue_head_t kswapd_wait;
 	wait_queue_head_t pfmemalloc_wait;
-	struct task_struct *kswapd;
-#ifdef CONFIG_MULTIPLE_KSWAPD
-	/*
-	 * Protected by mem_hotplug_begin/end()
-	 */
-	struct task_struct *mkswapd[MAX_KSWAPD_THREADS];
-#endif
+	struct task_struct *kswapd;	/* Protected by
+					   mem_hotplug_begin/end() */
 	int kswapd_order;
 	enum zone_type kswapd_classzone_idx;
 
 	int kswapd_failures;		/* Number of 'reclaimed == 0' runs */
+
+	wait_queue_head_t kshrinkd_wait;
+	struct task_struct *kshrinkd;
 
 #ifdef CONFIG_COMPACTION
 	int kcompactd_max_order;
@@ -1136,9 +1132,6 @@ static inline int is_highmem(struct zone *zone)
 
 /* These two functions are used to setup the per zone pages min values */
 struct ctl_table;
-int kswapd_threads_sysctl_handler(struct ctl_table *table, int write,
-					void __user *buffer, size_t *length,
-					loff_t *pos);
 int min_free_kbytes_sysctl_handler(struct ctl_table *, int,
 					void __user *, size_t *, loff_t *);
 int watermark_scale_factor_sysctl_handler(struct ctl_table *, int,

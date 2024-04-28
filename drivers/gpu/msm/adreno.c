@@ -3197,8 +3197,10 @@ static void adreno_read(struct kgsl_device *device, void __iomem *base,
 
 	reg = (base + (offsetwords << 2));
 
+#if 0
 	if (!in_interrupt())
 		kgsl_pre_hwaccess(device);
+#endif
 
 	*value = __raw_readl(reg);
 	/*
@@ -3245,8 +3247,10 @@ static void adreno_regwrite(struct kgsl_device *device,
 			offsetwords, device->reg_len >> 2))
 		return;
 
+#if 0
 	if (!in_interrupt())
 		kgsl_pre_hwaccess(device);
+#endif
 
 	trace_kgsl_regwrite(device, offsetwords, value);
 
@@ -3343,11 +3347,7 @@ int adreno_gmu_fenced_write(struct adreno_device *adreno_dev,
 			break;
 
 		/* Wait a small amount of time before trying again */
-		if (in_atomic())
-			udelay(GMU_CORE_WAKEUP_DELAY_US);
-		else
-			usleep_range(GMU_CORE_WAKEUP_DELAY_US,
-				     3 * GMU_CORE_WAKEUP_DELAY_US);
+		udelay(GMU_CORE_WAKEUP_DELAY_US);
 
 		/* Try to write the fenced register again */
 		adreno_writereg(adreno_dev, offset, val);

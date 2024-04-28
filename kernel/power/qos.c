@@ -68,7 +68,7 @@ static DEFINE_RAW_SPINLOCK(pm_qos_lock);
 
 static struct pm_qos_object null_pm_qos;
 
-static BLOCKING_NOTIFIER_HEAD(cpu_dma_lat_notifier);
+SRCU_NOTIFIER_HEAD_STATIC(cpu_dma_lat_notifier);
 static struct pm_qos_constraints cpu_dma_constraints = {
 	.list = PLIST_HEAD_INIT(cpu_dma_constraints.list),
 	.target_value = PM_QOS_CPU_DMA_LAT_DEFAULT_VALUE,
@@ -84,7 +84,7 @@ static struct pm_qos_object cpu_dma_pm_qos = {
 	.name = "cpu_dma_latency",
 };
 
-static BLOCKING_NOTIFIER_HEAD(network_lat_notifier);
+SRCU_NOTIFIER_HEAD_STATIC(network_lat_notifier);
 static struct pm_qos_constraints network_lat_constraints = {
 	.list = PLIST_HEAD_INIT(network_lat_constraints.list),
 	.target_value = PM_QOS_NETWORK_LAT_DEFAULT_VALUE,
@@ -100,7 +100,7 @@ static struct pm_qos_object network_lat_pm_qos = {
 	.name = "network_latency",
 };
 
-static BLOCKING_NOTIFIER_HEAD(network_throughput_notifier);
+SRCU_NOTIFIER_HEAD_STATIC(network_throughput_notifier);
 static struct pm_qos_constraints network_tput_constraints = {
 	.list = PLIST_HEAD_INIT(network_tput_constraints.list),
 	.target_value = PM_QOS_NETWORK_THROUGHPUT_DEFAULT_VALUE,
@@ -117,7 +117,7 @@ static struct pm_qos_object network_throughput_pm_qos = {
 };
 
 
-static BLOCKING_NOTIFIER_HEAD(memory_bandwidth_notifier);
+SRCU_NOTIFIER_HEAD_STATIC(memory_bandwidth_notifier);
 static struct pm_qos_constraints memory_bw_constraints = {
 	.list = PLIST_HEAD_INIT(memory_bw_constraints.list),
 	.target_value = PM_QOS_MEMORY_BANDWIDTH_DEFAULT_VALUE,
@@ -390,7 +390,7 @@ static int pm_qos_update_target_cpus(struct pm_qos_constraints *c,
 	   (ret && prev_value != curr_value)) {
 		ret = 1;
 		if (c->notifiers)
-			blocking_notifier_call_chain(c->notifiers,
+			srcu_notifier_call_chain(c->notifiers,
 				     (unsigned long)curr_value, &cpus);
 	} else {
 		ret = 0;
@@ -409,7 +409,7 @@ static int pm_qos_update_target_cpus(struct pm_qos_constraints *c,
  * This function returns 1 if the aggregated constraint value has changed, 0
  *  otherwise.
  */
-int pm_qos_update_target(struct pm_qos_constraints *c, struct plist_node *node,
+int __always_inline pm_qos_update_target(struct pm_qos_constraints *c, struct plist_node *node,
 			 enum pm_qos_req_action action, int value)
 {
 	return pm_qos_update_target_cpus(c, node, action, value, 0);
@@ -536,7 +536,7 @@ int pm_qos_request_for_cpumask(int pm_qos_class, struct cpumask *mask)
 }
 EXPORT_SYMBOL(pm_qos_request_for_cpumask);
 
-static void __pm_qos_update_request(struct pm_qos_request *req,
+static __always_inline void __pm_qos_update_request(struct pm_qos_request *req,
 			   s32 new_value)
 {
 	trace_pm_qos_update_request(req->pm_qos_class, new_value);
@@ -674,7 +674,7 @@ EXPORT_SYMBOL_GPL(pm_qos_add_request);
  *
  * Attempts are made to make this code callable on hot code paths.
  */
-void pm_qos_update_request(struct pm_qos_request *req,
+void __always_inline pm_qos_update_request(struct pm_qos_request *req,
 			   s32 new_value)
 {
 	if (!req) /*guard against callers passing in null */
@@ -738,7 +738,7 @@ int pm_qos_add_notifier(int pm_qos_class, struct notifier_block *notifier)
 {
 	int retval;
 
-	retval = blocking_notifier_chain_register(
+	retval = srcu_notifier_chain_register(
 			pm_qos_array[pm_qos_class]->constraints->notifiers,
 			notifier);
 
@@ -758,7 +758,7 @@ int pm_qos_remove_notifier(int pm_qos_class, struct notifier_block *notifier)
 {
 	int retval;
 
-	retval = blocking_notifier_chain_unregister(
+	retval = srcu_notifier_chain_unregister(
 			pm_qos_array[pm_qos_class]->constraints->notifiers,
 			notifier);
 

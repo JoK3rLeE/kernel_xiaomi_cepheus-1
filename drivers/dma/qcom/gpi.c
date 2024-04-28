@@ -3011,8 +3011,8 @@ static int gpi_probe(struct platform_device *pdev)
 		return ret;
 	}
 
-	gpi_dev->gpiis = devm_kzalloc(gpi_dev->dev,
-				sizeof(*gpi_dev->gpiis) * gpi_dev->max_gpii,
+	gpi_dev->gpiis = devm_kcalloc(gpi_dev->dev,
+				gpi_dev->max_gpii, sizeof(*gpi_dev->gpiis),
 				GFP_KERNEL);
 	if (!gpi_dev->gpiis)
 		return -ENOMEM;
@@ -3150,6 +3150,7 @@ static struct platform_driver gpi_driver = {
 	.driver = {
 		.name = GPI_DMA_DRV_NAME,
 		.of_match_table = gpi_of_match,
+		.probe_type = PROBE_FORCE_SYNCHRONOUS,
 	},
 };
 

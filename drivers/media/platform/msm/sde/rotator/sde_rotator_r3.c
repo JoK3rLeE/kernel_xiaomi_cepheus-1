@@ -545,7 +545,7 @@ static struct sde_rot_regdump sde_rot_r3_regdump[] = {
 
 struct sde_rot_cdp_params {
 	bool enable;
-	struct sde_mdp_format_params *fmt;
+	const struct sde_mdp_format_params *fmt;
 	u32 offset;
 };
 
@@ -917,15 +917,13 @@ static int sde_hw_rotator_irq_setup(struct sde_hw_rotator *rot)
 		SDEROT_ERR("fail to get rot irq, fallback to poll %d\n", rc);
 	} else {
 		if (rot->mode == ROT_REGDMA_OFF)
-			rc = devm_request_threaded_irq(&rot->pdev->dev,
+			rc = devm_request_irq (&rot->pdev->dev,
 					rot->irq_num,
-					sde_hw_rotator_rotirq_handler,
-					NULL, 0, "sde_rotator_r3", rot);
+					sde_hw_rotator_rotirq_handler, IRQF_NO_THREAD, "sde_rotator_r3", rot);
 		else
-			rc = devm_request_threaded_irq(&rot->pdev->dev,
+			rc = devm_request_irq (&rot->pdev->dev,
 					rot->irq_num,
-					sde_hw_rotator_regdmairq_handler,
-					NULL, 0, "sde_rotator_r3", rot);
+					sde_hw_rotator_regdmairq_handler, IRQF_NO_THREAD, "sde_rotator_r3", rot);
 		if (rc) {
 			SDEROT_ERR("fail to request irq r:%d\n", rc);
 			rot->irq_num = -1;
@@ -1588,7 +1586,7 @@ static void sde_hw_rotator_setup_fetchengine(struct sde_hw_rotator_context *ctx,
 		u32 dnsc_factor_w, u32 dnsc_factor_h, u32 flags)
 {
 	struct sde_hw_rotator *rot = ctx->rot;
-	struct sde_mdp_format_params *fmt;
+	const struct sde_mdp_format_params *fmt;
 	struct sde_mdp_data *data;
 	struct sde_rot_cdp_params cdp_params = {0};
 	struct sde_rot_data_type *mdata = sde_rot_get_mdata();
@@ -1813,7 +1811,7 @@ static void sde_hw_rotator_setup_wbengine(struct sde_hw_rotator_context *ctx,
 		u32 flags)
 {
 	struct sde_rot_data_type *mdata = sde_rot_get_mdata();
-	struct sde_mdp_format_params *fmt;
+	const struct sde_mdp_format_params *fmt;
 	struct sde_rot_cdp_params cdp_params = {0};
 	char __iomem *wrptr;
 	u32 pack = 0;
@@ -3495,7 +3493,7 @@ static int sde_hw_rotator_validate_entry(struct sde_rot_mgr *mgr,
 	int ret = 0;
 	u16 src_w, src_h, dst_w, dst_h;
 	struct sde_rotation_item *item = &entry->item;
-	struct sde_mdp_format_params *fmt;
+	const struct sde_mdp_format_params *fmt;
 
 	if (!mgr || !entry || !mgr->hw_data) {
 		SDEROT_ERR("invalid parameters\n");

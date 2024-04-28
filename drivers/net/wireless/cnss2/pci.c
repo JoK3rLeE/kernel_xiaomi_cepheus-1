@@ -735,9 +735,10 @@ static void cnss_pci_dump_shadow_reg(struct cnss_pci_data *pci_priv)
 		gfp = GFP_ATOMIC;
 
 	if (!pci_priv->debug_reg) {
-		pci_priv->debug_reg = devm_kzalloc(&pci_priv->pci_dev->dev,
-						   sizeof(*pci_priv->debug_reg)
-						   * array_size, gfp);
+		pci_priv->debug_reg = devm_kcalloc(&pci_priv->pci_dev->dev,
+						   array_size,
+						   sizeof(*pci_priv->debug_reg),
+						   gfp);
 		if (!pci_priv->debug_reg)
 			return;
 	}
@@ -1413,7 +1414,12 @@ int cnss_pci_register_driver_hdlr(struct cnss_pci_data *pci_priv,
 
 int cnss_pci_unregister_driver_hdlr(struct cnss_pci_data *pci_priv)
 {
-	struct cnss_plat_data *plat_priv = pci_priv->plat_priv;
+	struct cnss_plat_data *plat_priv;
+
+	if (!pci_priv)
+		return -EINVAL;
+
+	plat_priv = pci_priv->plat_priv;
 
 	set_bit(CNSS_DRIVER_UNLOADING, &plat_priv->driver_state);
 	cnss_pci_dev_shutdown(pci_priv);
@@ -2786,9 +2792,10 @@ static void cnss_pci_dump_qdss_reg(struct cnss_pci_data *pci_priv)
 		gfp = GFP_ATOMIC;
 
 	if (!plat_priv->qdss_reg) {
-		plat_priv->qdss_reg = devm_kzalloc(&pci_priv->pci_dev->dev,
-						   sizeof(*plat_priv->qdss_reg)
-						   * array_size, gfp);
+		plat_priv->qdss_reg = devm_kcalloc(&pci_priv->pci_dev->dev,
+						   array_size,
+						   sizeof(*plat_priv->qdss_reg),
+						   gfp);
 		if (!plat_priv->qdss_reg)
 			return;
 	}
@@ -3231,6 +3238,9 @@ static void cnss_pci_unregister_mhi(struct cnss_pci_data *pci_priv)
 	ipc_log_context_destroy(mhi_ctrl->log_buf);
 	ipc_log_context_destroy(mhi_ctrl->cntrl_log_buf);
 	kfree(mhi_ctrl->irq);
+	mhi_ctrl->irq = NULL;
+	mhi_free_controller(mhi_ctrl);
+	pci_priv->mhi_ctrl = NULL;
 }
 
 static int cnss_pci_check_mhi_state_bit(struct cnss_pci_data *pci_priv,
@@ -3775,6 +3785,7 @@ static void cnss_pci_remove(struct pci_dev *pci_dev)
 	struct cnss_plat_data *plat_priv =
 		cnss_bus_dev_to_plat_priv(&pci_dev->dev);
 
+	cnss_pci_unregister_driver_hdlr(pci_priv);
 	cnss_pci_free_m3_mem(pci_priv);
 	cnss_pci_free_fw_mem(pci_priv);
 	cnss_pci_free_qdss_mem(pci_priv);

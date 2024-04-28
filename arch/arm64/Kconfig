@@ -125,8 +125,8 @@ config ARM64
 	select HAVE_FUNCTION_GRAPH_TRACER if !SHADOW_CALL_STACK
 	select HAVE_GCC_PLUGINS
 	select HAVE_GENERIC_DMA_COHERENT
-	select HAVE_HW_BREAKPOINT if PERF_EVENTS
 	select HAVE_IRQ_TIME_ACCOUNTING
+	select HAVE_LD_DEAD_CODE_DATA_ELIMINATION
 	select HAVE_MEMBLOCK
 	select HAVE_MEMBLOCK_NODE_MAP if NUMA
 	select HAVE_NMI if ACPI_APEI_SEA
@@ -149,6 +149,7 @@ config ARM64
 	select OF_EARLY_FLATTREE
 	select OF_RESERVED_MEM
 	select PCI_ECAM if ACPI
+	select PCI_LOCKLESS_CONFIG if PCI && ARCH_QCOM
 	select POWER_RESET
 	select POWER_SUPPLY
 	select SPARSE_IRQ
@@ -573,6 +574,22 @@ config ARM64_ERRATUM_1188873
 	  Affected Cortex-A76 cores (r0p0, r1p0, r2p0) could cause
 	  register corruption when accessing the timer registers from
 	  AArch32 userspace.
+
+	  If unsure, say Y.
+
+config ARM64_ERRATUM_1742098
+	bool "Cortex-A57/A72: 1742098: ELR recorded incorrectly on interrupt taken between cryptographic instructions in a sequence"
+	depends on COMPAT
+	default y
+	help
+	  This option removes the AES hwcap for aarch32 user-space to
+	  workaround erratum 1742098 on Cortex-A57 and Cortex-A72.
+
+	  Affected parts may corrupt the AES state if an interrupt is
+	  taken between a pair of AES instructions. These instructions
+	  are only present if the cryptography extensions are present.
+	  All software should have a fallback implementation for CPUs
+	  that don't implement the cryptography extensions.
 
 	  If unsure, say Y.
 
@@ -1093,7 +1110,7 @@ config MITIGATE_SPECTRE_BRANCH_HISTORY
 	  Speculation attacks against some high-performance processors can
 	  make use of branch history to influence future speculation.
 	  When taking an exception from user-space, a sequence of branches
-	  or a firmware call overwrites the branch history
+	  or a firmware call overwrites the branch history.
 
 menuconfig ARMV8_DEPRECATED
 	bool "Emulate deprecated/obsolete ARMv8 instructions"
@@ -1540,10 +1557,10 @@ config COMPAT_VDSO
 	help
 	  Warning: a 32-bit toolchain is necessary to build the vDSO. You
 	  must explicitly define which toolchain should be used by setting
-	  CROSS_COMPILE_ARM32 to the prefix of the 32-bit toolchain (same format
-	  as CROSS_COMPILE). If CROSS_COMPILE_ARM32 is empty, a warning will be
+	  CROSS_COMPILE_COMPAT to the prefix of the 32-bit toolchain (same format
+	  as CROSS_COMPILE). If CROSS_COMPILE_COMPAT is empty, a warning will be
 	  printed and the kernel will be built as if COMPAT_VDSO had not been
-	  set. If CROSS_COMPILE_ARM32 is set to an invalid prefix, compilation
+	  set. If CROSS_COMPILE_COMPAT is set to an invalid prefix, compilation
 	  will be aborted.
 
 	  Provide a vDSO to 32-bit processes. It includes the symbols provided
@@ -1551,10 +1568,10 @@ config COMPAT_VDSO
 	  the compat vDSO without modification. It also provides sigreturn
 	  trampolines, replacing the sigreturn page.
 
-config CROSS_COMPILE_ARM32
+config CROSS_COMPILE_COMPAT
 	string "32-bit toolchain prefix"
 	help
-	  Same as setting CROSS_COMPILE_ARM32 in the environment, but saved for
+	  Same as setting CROSS_COMPILE_COMPAT in the environment, but saved for
 	  future builds. The environment variable overrides this config option.
 
 endmenu

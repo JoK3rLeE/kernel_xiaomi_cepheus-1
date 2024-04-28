@@ -78,6 +78,7 @@
 			enable-method = "psci";
 			capacity-dmips-mhz = <488>;
 			next-level-cache = <&L2_0>;
+			freq-energy-model;
 			sched-energy-costs = <&CPU_COST_0 &CLUSTER_COST_0>;
 			qcom,lmh-dcvs = <&lmh_dcvs0>;
 			#cooling-cells = <2>;
@@ -114,6 +115,7 @@
 			enable-method = "psci";
 			capacity-dmips-mhz = <488>;
 			next-level-cache = <&L2_1>;
+			freq-energy-model;
 			sched-energy-costs = <&CPU_COST_0 &CLUSTER_COST_0>;
 			qcom,lmh-dcvs = <&lmh_dcvs0>;
 			#cooling-cells = <2>;
@@ -145,6 +147,7 @@
 			enable-method = "psci";
 			capacity-dmips-mhz = <488>;
 			next-level-cache = <&L2_2>;
+			freq-energy-model;
 			sched-energy-costs = <&CPU_COST_0 &CLUSTER_COST_0>;
 			qcom,lmh-dcvs = <&lmh_dcvs0>;
 			#cooling-cells = <2>;
@@ -176,6 +179,7 @@
 			enable-method = "psci";
 			capacity-dmips-mhz = <488>;
 			next-level-cache = <&L2_3>;
+			freq-energy-model;
 			sched-energy-costs = <&CPU_COST_0 &CLUSTER_COST_0>;
 			qcom,lmh-dcvs = <&lmh_dcvs0>;
 			#cooling-cells = <2>;
@@ -207,6 +211,7 @@
 			enable-method = "psci";
 			capacity-dmips-mhz = <1024>;
 			next-level-cache = <&L2_4>;
+			freq-energy-model;
 			sched-energy-costs = <&CPU_COST_1 &CLUSTER_COST_1>;
 			qcom,lmh-dcvs = <&lmh_dcvs1>;
 			#cooling-cells = <2>;
@@ -247,6 +252,7 @@
 			enable-method = "psci";
 			capacity-dmips-mhz = <1024>;
 			next-level-cache = <&L2_5>;
+			freq-energy-model;
 			sched-energy-costs = <&CPU_COST_1 &CLUSTER_COST_1>;
 			qcom,lmh-dcvs = <&lmh_dcvs1>;
 			#cooling-cells = <2>;
@@ -287,6 +293,7 @@
 			enable-method = "psci";
 			capacity-dmips-mhz = <1024>;
 			next-level-cache = <&L2_6>;
+			freq-energy-model;
 			sched-energy-costs = <&CPU_COST_1 &CLUSTER_COST_1>;
 			qcom,lmh-dcvs = <&lmh_dcvs1>;
 			#cooling-cells = <2>;
@@ -327,6 +334,7 @@
 			enable-method = "psci";
 			capacity-dmips-mhz = <1024>;
 			next-level-cache = <&L2_7>;
+			freq-energy-model;
 			sched-energy-costs = <&CPU_COST_2 &CLUSTER_COST_2>;
 			qcom,lmh-dcvs = <&lmh_dcvs1>;
 			#cooling-cells = <2>;
@@ -550,7 +558,7 @@
 	};
 
 	chosen {
-		bootargs = "quiet rcupdate.rcu_expedited=1 rcupdate.rcu_normal_after_boot=1 rcu_nocbs=0-7 noirqdebug nodebugmon kpti=off cgroup_disable=pressure";
+		bootargs = "quiet rcupdate.rcu_expedited=1 rcupdate.rcu_normal_after_boot=1 rcu_nocbs=0-7 noirqdebug nodebugmon kpti=off cgroup_disable=pressure threadirqs";
 		rng-seed = <0x12345678>;
 	};
 
@@ -558,21 +566,9 @@
 
 	firmware: firmware {
 		android {
+			boot_devices = "soc/1d84000.ufshc";
 			compatible = "android,firmware";
 			shared_meta: vbmeta {
-				compatible = "android,vbmeta";
-				parts = "vbmeta,boot,system,vendor,dtbo";
-			};
-			android_q_fstab: fstab {
-				compatible = "android,fstab";
-				vendor {
-					compatible = "android,vendor";
-					dev = "/dev/block/platform/soc/8804000.ufshc/by-name/vendor";
-					type = "ext4";
-					mnt_flags = "ro,barrier=1,discard";
-					fsmgr_flags = "wait";
-					status = "ok";
-				};
 			};
 		};
 	};
@@ -2442,8 +2438,8 @@
 		"MAX";
 
 		/* PM QoS */
-		qcom,pm-qos-cpu-groups = <0x0f 0xf0>;
-		qcom,pm-qos-cpu-group-latency-us = <44 44>;
+		qcom,pm-qos-cpu-groups = <0x01 0x02 0x04 0x08 0x10 0x20 0x40 0x80>;
+		qcom,pm-qos-cpu-group-latency-us = <100 100 100 100 100 100 100 100>;
 		qcom,pm-qos-default-cpu = <0>;
 
 		pinctrl-names = "dev-reset-assert", "dev-reset-deassert";

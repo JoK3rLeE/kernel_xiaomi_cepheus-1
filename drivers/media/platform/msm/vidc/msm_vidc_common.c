@@ -28,6 +28,13 @@ static struct kmem_cache *kmem_buf_pool;
 
 #define MSM_VIDC_QBUF_BATCH_TIMEOUT 300
 
+static struct kmem_cache *kmem_buf_pool;
+
+void __init init_vidc_kmem_buf_pool(void)
+{
+	kmem_buf_pool = KMEM_CACHE(msm_vidc_buffer, SLAB_HWCACHE_ALIGN | SLAB_PANIC);
+}
+
 #define IS_ALREADY_IN_STATE(__p, __d) (\
 	(__p >= __d)\
 )
@@ -94,8 +101,9 @@ static struct v4l2_ctrl **get_super_cluster(struct msm_vidc_inst *inst,
 				int num_ctrls)
 {
 	int c = 0;
-	struct v4l2_ctrl **cluster = kmalloc(sizeof(struct v4l2_ctrl *) *
-			num_ctrls, GFP_KERNEL);
+	struct v4l2_ctrl **cluster = kmalloc_array(num_ctrls,
+						   sizeof(struct v4l2_ctrl *),
+						   GFP_KERNEL);
 
 	if (!cluster || !inst) {
 		kfree(cluster);
@@ -730,7 +738,6 @@ int msm_comm_ctrl_deinit(struct msm_vidc_inst *inst)
 	kfree(inst->ctrls);
 	kfree(inst->cluster);
 	v4l2_ctrl_handler_free(&inst->ctrl_handler);
-	kmem_cache_destroy(kmem_buf_pool);
 
 	return 0;
 }
@@ -6643,25 +6650,24 @@ struct msm_vidc_buffer *msm_comm_get_vidc_buffer(struct msm_vidc_inst *inst,
 	struct vb2_v4l2_buffer *vbuf;
 	struct vb2_buffer *vb;
 	unsigned long dma_planes[VB2_MAX_PLANES] = {0};
-	struct msm_vidc_buffer *mbuf;
+	struct msm_vidc_buffer *mbuf = NULL;
 	bool found = false;
-	int i;
+	int i = 0, planes = 0;
 
 	if (!inst || !vb2) {
 		dprintk(VIDC_ERR, "%s: invalid params\n", __func__);
 		return NULL;
 	}
 
-	for (i = 0; i < vb2->num_planes; i++) {
+	for (planes = 0; planes < vb2->num_planes; planes++) {
 		/*
 		 * always compare dma_buf addresses which is guaranteed
 		 * to be same across the processes (duplicate fds).
 		 */
-		dma_planes[i] = (unsigned long)msm_smem_get_dma_buf(
-				vb2->planes[i].m.fd);
-		if (!dma_planes[i])
-			return NULL;
-		msm_smem_put_dma_buf((struct dma_buf *)dma_planes[i]);
+		dma_planes[planes] = (unsigned long)msm_smem_get_dma_buf(
+				vb2->planes[planes].m.fd);
+		if (!dma_planes[planes])
+			goto put_ref;
 	}
 
 	mutex_lock(&inst->registeredbufs.lock);
@@ -6764,27 +6770,22 @@ struct msm_vidc_buffer *msm_comm_get_vidc_buffer(struct msm_vidc_inst *inst,
 	if (!found)
 		list_add_tail(&mbuf->list, &inst->registeredbufs.list);
 
-	mutex_unlock(&inst->registeredbufs.lock);
-
-	/*
-	 * Return mbuf if decode batching is enabled as this buffer
-	 * may trigger queuing full batch to firmware, also this buffer
-	 * will not be queued to firmware while full batch queuing,
-	 * it will be queued when rbr event arrived from firmware.
-	 */
-	if (rc == -EEXIST && !inst->batch.enable)
-		return ERR_PTR(rc);
-
-	return mbuf;
-
 exit:
-	dprintk(VIDC_ERR, "%s: rc %d\n", __func__, rc);
-	msm_comm_unmap_vidc_buffer(inst, mbuf);
-	if (!found)
-		kref_put_mbuf(mbuf);
+	if (rc == -EEXIST) {
+		print_vidc_buffer(VIDC_DBG, "qbuf upon rbr", inst, mbuf);
+	} else if (rc) {
+		dprintk(VIDC_ERR, "%s: rc %d\n", __func__, rc);
+		msm_comm_unmap_vidc_buffer(inst, mbuf);
+		if (!found)
+			kref_put_mbuf(mbuf);
+	}
 	mutex_unlock(&inst->registeredbufs.lock);
+put_ref:
+	while (planes)
+		msm_smem_put_dma_buf((struct dma_buf *)dma_planes[--planes]);
 
-	return ERR_PTR(rc);
+	return rc ? ((rc == -EEXIST && !inst->batch.enable) ?
+			ERR_PTR(rc) : mbuf) : mbuf;
 }
 
 void msm_comm_put_vidc_buffer(struct msm_vidc_inst *inst,

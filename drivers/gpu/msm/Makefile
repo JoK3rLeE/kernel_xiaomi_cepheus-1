@@ -1,6 +1,4 @@
 ccflags-y := -Iinclude/linux
-ccflags-y += -mllvm -inline-threshold=15000
-ccflags-y += -mllvm -inlinehint-threshold=10000
 
 msm_kgsl_core-y = \
 	kgsl.o \
@@ -37,7 +35,6 @@ msm_adreno-y += \
 	adreno_perfcounter.o
 
 msm_adreno-$(CONFIG_QCOM_KGSL_IOMMU) += adreno_iommu.o
-msm_adreno-$(CONFIG_DEBUG_FS) += adreno_debugfs.o adreno_profile.o
 msm_adreno-$(CONFIG_COMPAT) += adreno_compat.o
 
 msm_kgsl_core-objs = $(msm_kgsl_core-y)

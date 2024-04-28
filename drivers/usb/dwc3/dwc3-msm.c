@@ -2097,8 +2097,8 @@ static void dwc3_msm_notify_event(struct dwc3 *dwc, unsigned int event,
 		if (!mdwc->num_gsi_event_buffers)
 			break;
 
-		mdwc->gsi_ev_buff = devm_kzalloc(dwc->dev,
-			sizeof(*dwc->ev_buf) * mdwc->num_gsi_event_buffers,
+		mdwc->gsi_ev_buff = devm_kcalloc(dwc->dev,
+			mdwc->num_gsi_event_buffers, sizeof(*dwc->ev_buf),
 			GFP_KERNEL);
 		if (!mdwc->gsi_ev_buff) {
 			dev_err(dwc->dev, "can't allocate gsi_ev_buff\n");
@@ -5414,6 +5414,7 @@ static struct platform_driver dwc3_msm_driver = {
 		.name	= "msm-dwc3",
 		.pm	= &dwc3_msm_dev_pm_ops,
 		.of_match_table	= of_dwc3_matach,
+		.probe_type = PROBE_FORCE_SYNCHRONOUS,
 	},
 };
 

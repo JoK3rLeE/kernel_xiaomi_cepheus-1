@@ -619,7 +619,7 @@ static int __setplane_internal(struct drm_plane *plane,
 	/* Check whether this plane supports the fb pixel format. */
 	ret = drm_plane_check_pixel_format(plane, fb->format->format);
 	if (ret) {
-		struct drm_format_name_buf format_name;
+		__maybe_unused struct drm_format_name_buf format_name;
 		DRM_DEBUG_KMS("Invalid pixel format %s\n",
 		              drm_get_format_name(fb->format->format,
 		                                  &format_name));
@@ -1077,6 +1077,7 @@ retry:
 out:
 	if (fb)
 		drm_framebuffer_put(fb);
+	fb = NULL;
 	if (crtc->primary->old_fb)
 		drm_framebuffer_put(crtc->primary->old_fb);
 	crtc->primary->old_fb = NULL;

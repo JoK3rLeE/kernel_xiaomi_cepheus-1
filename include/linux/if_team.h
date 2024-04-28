@@ -71,7 +71,7 @@ struct team_port {
 	u16 queue_id;
 	struct list_head qom_list; /* node in queue override mapping list */
 	struct rcu_head	rcu;
-	long mode_priv[0];
+	long mode_priv[];
 };
 
 static inline bool team_port_enabled(struct team_port *port)
@@ -177,6 +177,8 @@ struct team_mode {
 struct team {
 	struct net_device *dev; /* associated netdevice */
 	struct team_pcpu_stats __percpu *pcpu_stats;
+
+	const struct header_ops *header_ops_cache;
 
 	struct mutex lock; /* used for overall locking, e.g. port lists write */
 

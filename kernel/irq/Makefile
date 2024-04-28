@@ -1,8 +1,5 @@
 # SPDX-License-Identifier: GPL-2.0
 
-ccflags-y += -mllvm -inline-threshold=15000
-ccflags-y += -mllvm -inlinehint-threshold=10000
-
 obj-y := irqdesc.o handle.o manage.o spurious.o resend.o chip.o dummychip.o devres.o
 obj-$(CONFIG_IRQ_TIMINGS) += timings.o
 obj-$(CONFIG_GENERIC_IRQ_CHIP) += generic-chip.o
@@ -17,3 +14,4 @@ obj-$(CONFIG_GENERIC_MSI_IRQ) += msi.o
 obj-$(CONFIG_GENERIC_IRQ_IPI) += ipi.o
 obj-$(CONFIG_SMP) += affinity.o
 obj-$(CONFIG_GENERIC_IRQ_DEBUGFS) += debugfs.o
+obj-$(CONFIG_IRQ_SBALANCE) += sbalance.o

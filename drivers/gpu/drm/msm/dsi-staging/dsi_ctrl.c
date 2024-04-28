@@ -978,35 +978,24 @@ error:
 	return rc;
 }
 
-static int dsi_ctrl_copy_and_pad_cmd(struct dsi_ctrl *dsi_ctrl,
-				     const struct mipi_dsi_packet *packet,
-				     u8 **buffer,
-				     u32 *size)
+static int dsi_ctrl_copy_and_pad_cmd(const struct mipi_dsi_packet *packet,
+				     u8 *buf, size_t len)
 {
 	int rc = 0;
-	u8 *buf = NULL;
-	u32 len, i;
 	u8 cmd_type = 0;
 
-	len = packet->size;
-	len += 0x3; len &= ~0x03; /* Align to 32 bits */
+	if (unlikely(len < packet->size))
+		return -EINVAL;
 
-	buf = devm_kzalloc(&dsi_ctrl->pdev->dev, len * sizeof(u8), GFP_KERNEL);
-	if (!buf)
-		return -ENOMEM;
-
-	for (i = 0; i < len; i++) {
-		if (i >= packet->size)
-			buf[i] = 0xFF;
-		else if (i < sizeof(packet->header))
-			buf[i] = packet->header[i];
-		else
-			buf[i] = packet->payload[i - sizeof(packet->header)];
-	}
+	memcpy(buf, packet->header, sizeof(packet->header));
+	if (packet->payload_length)
+		memcpy(buf + sizeof(packet->header), packet->payload,
+		       packet->payload_length);
+	if (packet->size < len)
+		memset(buf + packet->size, 0xFF, len - packet->size);
 
 	if (packet->payload_length > 0)
 		buf[3] |= BIT(6);
-
 
 	/* send embedded BTA for read commands */
 	cmd_type = buf[2] & 0x3f;
@@ -1015,9 +1004,6 @@ static int dsi_ctrl_copy_and_pad_cmd(struct dsi_ctrl *dsi_ctrl,
 	    (cmd_type == MIPI_DSI_GENERIC_READ_REQUEST_1_PARAM) ||
 	    (cmd_type == MIPI_DSI_GENERIC_READ_REQUEST_2_PARAM))
 		buf[3] |= BIT(5);
-
-	*buffer = buf;
-	*size = len;
 
 	return rc;
 }
@@ -1139,11 +1125,13 @@ int dsi_message_validate_tx_mode(struct dsi_ctrl *dsi_ctrl,
 			pr_debug("Cannot transfer,size is greater than 4096\n");
 			return -ENOTSUPP;
 		}
-	}
+	} else if (*flags & DSI_CTRL_CMD_FETCH_MEMORY) {
+		const size_t transfer_size = dsi_ctrl->cmd_len + cmd_len + 4;
 
-	if (*flags & DSI_CTRL_CMD_FETCH_MEMORY) {
-		if ((dsi_ctrl->cmd_len + cmd_len + 4) > SZ_4K) {
-			pr_debug("Cannot transfer,size is greater than 4096\n");
+		if (transfer_size > DSI_EMBEDDED_MODE_DMA_MAX_SIZE_BYTES) {
+			pr_err("Cannot transfer, size: %zu is greater than %d\n",
+			       transfer_size,
+			       DSI_EMBEDDED_MODE_DMA_MAX_SIZE_BYTES);
 			return -ENOTSUPP;
 		}
 	}
@@ -1160,9 +1148,9 @@ static int dsi_message_tx(struct dsi_ctrl *dsi_ctrl,
 	struct dsi_ctrl_cmd_dma_fifo_info cmd;
 	struct dsi_ctrl_cmd_dma_info cmd_mem;
 	u32 hw_flags = 0;
-	u32 length = 0;
+	u32 length;
 	u8 *buffer = NULL;
-	u32 cnt = 0, line_no = 0x1;
+	u32 line_no = 0x1;
 	u8 *cmdbuf;
 	struct dsi_mode_info *timing;
 	struct dsi_ctrl_hw_ops dsi_hw_ops = dsi_ctrl->hw.ops;
@@ -1177,6 +1165,10 @@ static int dsi_message_tx(struct dsi_ctrl *dsi_ctrl,
 		rc = -ENOTSUPP;
 		goto error;
 	}
+
+	pr_debug("cmd tx type=%02x cmd=%02x len=%d last=%d\n", msg->type,
+		 msg->tx_len ? *((u8 *)msg->tx_buf) : 0, msg->tx_len,
+		 (msg->flags & MIPI_DSI_MSG_LASTCOMMAND) != 0);
 
 	if (flags & DSI_CTRL_CMD_NON_EMBEDDED_MODE) {
 		cmd_mem.offset = dsi_ctrl->cmd_buffer_iova;
@@ -1203,20 +1195,22 @@ static int dsi_message_tx(struct dsi_ctrl *dsi_ctrl,
 		goto error;
 	}
 
-	rc = dsi_ctrl_copy_and_pad_cmd(dsi_ctrl,
-			&packet,
-			&buffer,
-			&length);
-	if (rc) {
-		pr_debug("[%s] failed to copy message, rc=%d\n",
-				dsi_ctrl->name, rc);
-		goto error;
-	}
+	length = ALIGN(packet.size, 4);
 
 	if ((msg->flags & MIPI_DSI_MSG_LASTCOMMAND))
-		buffer[3] |= BIT(7);//set the last cmd bit in header.
+		packet.header[3] |= BIT(7);//set the last cmd bit in header.
 
 	if (flags & DSI_CTRL_CMD_FETCH_MEMORY) {
+		msm_gem_sync(dsi_ctrl->tx_cmd_buf);
+		cmdbuf = dsi_ctrl->vaddr + dsi_ctrl->cmd_len;
+
+		rc = dsi_ctrl_copy_and_pad_cmd(&packet, cmdbuf, length);
+		if (rc) {
+			pr_err("[%s] failed to copy message, rc=%d\n",
+					dsi_ctrl->name, rc);
+			goto error;
+		}
+
 		/* Embedded mode config is selected */
 		cmd_mem.offset = dsi_ctrl->cmd_buffer_iova;
 		cmd_mem.en_broadcast = (flags & DSI_CTRL_CMD_BROADCAST) ?
@@ -1225,12 +1219,6 @@ static int dsi_message_tx(struct dsi_ctrl *dsi_ctrl,
 			true : false;
 		cmd_mem.use_lpm = (msg->flags & MIPI_DSI_MSG_USE_LPM) ?
 			true : false;
-
-		cmdbuf = (u8 *)(dsi_ctrl->vaddr);
-
-		msm_gem_sync(dsi_ctrl->tx_cmd_buf);
-		for (cnt = 0; cnt < length; cnt++)
-			cmdbuf[dsi_ctrl->cmd_len + cnt] = buffer[cnt];
 
 		dsi_ctrl->cmd_len += length;
 
@@ -1242,6 +1230,20 @@ static int dsi_message_tx(struct dsi_ctrl *dsi_ctrl,
 		}
 
 	} else if (flags & DSI_CTRL_CMD_FIFO_STORE) {
+		buffer = devm_kzalloc(&dsi_ctrl->pdev->dev, length,
+					   GFP_KERNEL);
+		if (!buffer) {
+			rc = -ENOMEM;
+			goto error;
+		}
+
+		rc = dsi_ctrl_copy_and_pad_cmd(&packet, buffer, length);
+		if (rc) {
+			pr_err("[%s] failed to copy message, rc=%d\n",
+					dsi_ctrl->name, rc);
+			goto error;
+		}
+
 		cmd.command =  (u32 *)buffer;
 		cmd.size = length;
 		cmd.en_broadcast = (flags & DSI_CTRL_CMD_BROADCAST) ?
@@ -1847,7 +1849,7 @@ static int dsi_ctrl_dev_probe(struct platform_device *pdev)
 	dsi_ctrl->irq_info.irq_num = -1;
 	dsi_ctrl->irq_info.irq_stat_mask = 0x0;
 
-	spin_lock_init(&dsi_ctrl->irq_info.irq_lock);
+	raw_spin_lock_init(&dsi_ctrl->irq_info.irq_lock);
 
 	rc = dsi_ctrl_dts_parse(dsi_ctrl, pdev->dev.of_node);
 	if (rc) {
@@ -2558,9 +2560,9 @@ static irqreturn_t dsi_ctrl_isr(int irq, void *ptr)
 
 	for (i = 0; status && i < DSI_STATUS_INTERRUPT_COUNT; ++i) {
 		if (status & 0x1) {
-			spin_lock_irqsave(&dsi_ctrl->irq_info.irq_lock, flags);
+			raw_spin_lock_irqsave(&dsi_ctrl->irq_info.irq_lock, flags);
 			cb_info = dsi_ctrl->irq_info.irq_stat_cb[i];
-			spin_unlock_irqrestore(
+			raw_spin_unlock_irqrestore(
 					&dsi_ctrl->irq_info.irq_lock, flags);
 
 			if (cb_info.event_cb)
@@ -2600,8 +2602,9 @@ static int _dsi_ctrl_setup_isr(struct dsi_ctrl *dsi_ctrl)
 				dsi_ctrl->cell_index, irq_num);
 		rc = irq_num;
 	} else {
-		rc = devm_request_threaded_irq(&dsi_ctrl->pdev->dev, irq_num,
-				dsi_ctrl_isr, NULL, 0, "dsi_ctrl", dsi_ctrl);
+		rc = devm_request_irq(&dsi_ctrl->pdev->dev, irq_num,
+				dsi_ctrl_isr, IRQF_NO_THREAD, "dsi_ctrl",
+				dsi_ctrl);
 		if (rc) {
 			pr_debug("[DSI_%d] Failed to request IRQ, %d\n",
 					dsi_ctrl->cell_index, rc);
@@ -2641,7 +2644,7 @@ void dsi_ctrl_enable_status_interrupt(struct dsi_ctrl *dsi_ctrl,
 			intr_idx >= DSI_STATUS_INTERRUPT_COUNT)
 		return;
 
-	spin_lock_irqsave(&dsi_ctrl->irq_info.irq_lock, flags);
+	raw_spin_lock_irqsave(&dsi_ctrl->irq_info.irq_lock, flags);
 
 	if (dsi_ctrl->irq_info.irq_stat_refcount[intr_idx] == 0) {
 		/* enable irq on first request */
@@ -2658,7 +2661,7 @@ void dsi_ctrl_enable_status_interrupt(struct dsi_ctrl *dsi_ctrl,
 	if (event_info)
 		dsi_ctrl->irq_info.irq_stat_cb[intr_idx] = *event_info;
 
-	spin_unlock_irqrestore(&dsi_ctrl->irq_info.irq_lock, flags);
+	raw_spin_unlock_irqrestore(&dsi_ctrl->irq_info.irq_lock, flags);
 }
 
 void dsi_ctrl_disable_status_interrupt(struct dsi_ctrl *dsi_ctrl,
@@ -2669,7 +2672,7 @@ void dsi_ctrl_disable_status_interrupt(struct dsi_ctrl *dsi_ctrl,
 	if (!dsi_ctrl || intr_idx >= DSI_STATUS_INTERRUPT_COUNT)
 		return;
 
-	spin_lock_irqsave(&dsi_ctrl->irq_info.irq_lock, flags);
+	raw_spin_lock_irqsave(&dsi_ctrl->irq_info.irq_lock, flags);
 
 	if (dsi_ctrl->irq_info.irq_stat_refcount[intr_idx])
 		if (--(dsi_ctrl->irq_info.irq_stat_refcount[intr_idx]) == 0) {
@@ -2683,7 +2686,7 @@ void dsi_ctrl_disable_status_interrupt(struct dsi_ctrl *dsi_ctrl,
 				disable_irq_nosync(dsi_ctrl->irq_info.irq_num);
 		}
 
-	spin_unlock_irqrestore(&dsi_ctrl->irq_info.irq_lock, flags);
+	raw_spin_unlock_irqrestore(&dsi_ctrl->irq_info.irq_lock, flags);
 }
 
 int dsi_ctrl_host_timing_update(struct dsi_ctrl *dsi_ctrl)

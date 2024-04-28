@@ -207,8 +207,6 @@ int dsi_display_set_backlight(struct drm_connector *connector,
 		goto error;
 	}
 
-	panel->bl_config.bl_level = bl_lvl;
-
 	/* scale backlight */
 	bl_scale = panel->bl_config.bl_scale;
 	bl_temp = bl_lvl * bl_scale / MAX_BL_SCALE_LEVEL;
@@ -231,6 +229,18 @@ int dsi_display_set_backlight(struct drm_connector *connector,
 	if (rc)
 		pr_debug("unable to set backlight\n");
 
+	if (bl_lvl == 4095 && panel->bl_config.bl_level <= 2047)
+	{
+		panel->hbm_mode = 1;
+		rc = dsi_panel_apply_hbm_mode(panel);
+	}
+	else if (bl_lvl <= 2047 && panel->bl_config.bl_level == 4095)
+	{
+		panel->hbm_mode = 0;
+		rc = dsi_panel_apply_hbm_mode(panel);
+	}
+
+	panel->bl_config.bl_level = bl_lvl;
 	rc = dsi_display_clk_ctrl(dsi_display->dsi_clk_handle,
 			DSI_CORE_CLK, DSI_CLK_OFF);
 	if (rc) {
@@ -1057,6 +1067,46 @@ static bool dsi_display_get_cont_splash_status(struct dsi_display *display)
 	return true;
 }
 
+static u32 interpolate(uint32_t x, uint32_t xa, uint32_t xb,
+		uint32_t ya, uint32_t yb)
+{
+	return ya + (yb - ya) * (x - xa) / (xb - xa);
+}
+
+struct blbl {
+        u32 bl;
+        u32 aod_bl;
+};
+
+struct blbl aod_bl_lut[] = {
+	{0, 1},
+	{10, 1},
+	{40, 9},
+	{90, 30},
+	{120, 40},
+};
+
+u32 dsi_panel_get_aod_bl(struct dsi_display *display) {
+	int i;
+	//cached value is better than reading display->panel->bl_config.bl_level
+	u32 cur_bl = dsi_panel_backlight_get();
+
+	for (i = 0; i < 5; i++)
+                if (aod_bl_lut[i].bl >= cur_bl)
+                        break;
+        if (i == 0)
+                return aod_bl_lut[i].aod_bl;
+
+        if (i == 4)
+                return aod_bl_lut[i - 1].aod_bl;
+
+        return interpolate(cur_bl,
+                           aod_bl_lut[i - 1].bl,
+                           aod_bl_lut[i].bl,
+                           aod_bl_lut[i - 1].aod_bl,
+                           aod_bl_lut[i].aod_bl);
+}
+
 int dsi_display_set_power(struct drm_connector *connector,
 		int power_mode, void *disp)
 {
@@ -1086,6 +1136,8 @@ int dsi_display_set_power(struct drm_connector *connector,
 		rc = dsi_panel_set_lp1(display->panel);
 		break;
 	case SDE_MODE_DPMS_LP2:
+		dsi_panel_set_backlight(display->panel, dsi_panel_get_aod_bl(display));
+		usleep_range(20000, 30000);
 		rc = dsi_panel_set_lp2(display->panel);
 		break;
 	case SDE_MODE_DPMS_ON:
@@ -2454,6 +2506,8 @@ static int dsi_display_ctrl_init(struct dsi_display *display)
 	int rc = 0;
 	int i;
 	struct dsi_display_ctrl *ctrl;
+	struct dsi_display_mode *cur_mode = display->panel->cur_mode;
+	bool is_cont_splash_enabled = display->is_cont_splash_enabled;
 
 	/* when ULPS suspend feature is enabled, we will keep the lanes in
 	 * ULPS during suspend state and clamp DSI phy. Hence while resuming
@@ -2465,8 +2519,17 @@ static int dsi_display_ctrl_init(struct dsi_display *display)
 	if (!display->panel->ulps_suspend_enabled || !display->ulps_enabled) {
 		display_for_each_ctrl(i, display) {
 			ctrl = &display->ctrl[i];
+
+			if ((cur_mode->dsi_mode_flags & DSI_MODE_FLAG_DMS) &&
+			    is_cont_splash_enabled) {
+				pr_info("[%s] Forcing DSI CTRL reinit for "
+					"Dynamic Mode Setting usecase during "
+					"continuous splash.\n", display->name);
+				is_cont_splash_enabled = false;
+			}
+
 			rc = dsi_ctrl_host_init(ctrl->ctrl,
-					display->is_cont_splash_enabled);
+					is_cont_splash_enabled);
 			if (rc) {
 				pr_debug("[%s] failed to init host_%d, rc=%d\n",
 				       display->name, i, rc);
@@ -4569,6 +4632,7 @@ static int dsi_display_set_mode_sub(struct dsi_display *display,
 	int i;
 	struct dsi_display_ctrl *ctrl;
 	struct dsi_display_mode_priv_info *priv_info;
+	bool commit_phy_timing = false;
 
 	priv_info = mode->priv_info;
 	if (!priv_info) {
@@ -4613,13 +4677,27 @@ static int dsi_display_set_mode_sub(struct dsi_display *display,
 				goto error;
 			}
 		}
-
+		if ((mode->dsi_mode_flags & DSI_MODE_FLAG_DMS) &&
+				(display->panel->panel_mode == DSI_OP_CMD_MODE)) {
+			atomic_set(&display->clkrate_change_pending, 1);
+		}
 		if (priv_info->phy_timing_len) {
 			display_for_each_ctrl(i, display) {
 				ctrl = &display->ctrl[i];
-				rc = dsi_phy_set_timing_params(ctrl->phy,
+				if ((mode->dsi_mode_flags & DSI_MODE_FLAG_DMS) &&
+					(display->panel->panel_mode == DSI_OP_CMD_MODE)) {
+					rc = dsi_phy_set_timing_params_commit(ctrl->phy,
 						priv_info->phy_timing_val,
 						priv_info->phy_timing_len);
+					pr_info("[%s] Force commit PHY timing params "
+						"for seamless DMS usecase\n",
+						display->name);
+				} else {
+					rc = dsi_phy_set_timing_params(ctrl->phy,
+						priv_info->phy_timing_val,
+						priv_info->phy_timing_len,
+						commit_phy_timing);
+				}
 				if (rc)
 					pr_debug("Fail to add timing params\n");
 			}
@@ -4664,16 +4742,18 @@ static int dsi_display_set_mode_sub(struct dsi_display *display,
 	}
 
 	if ((mode->dsi_mode_flags & DSI_MODE_FLAG_DMS) &&
-			(display->panel->panel_mode == DSI_OP_CMD_MODE))
+			(display->panel->panel_mode == DSI_OP_CMD_MODE)) {
+		commit_phy_timing = true;
 		atomic_set(&display->clkrate_change_pending, 1);
-
+	}
 
 	if (priv_info->phy_timing_len) {
 		display_for_each_ctrl(i, display) {
 			ctrl = &display->ctrl[i];
 			 rc = dsi_phy_set_timing_params(ctrl->phy,
 				priv_info->phy_timing_val,
-				priv_info->phy_timing_len);
+				priv_info->phy_timing_len,
+				commit_phy_timing);
 			if (rc)
 				pr_debug("failed to add DSI PHY timing params");
 		}
@@ -4898,8 +4978,7 @@ static int dsi_display_link_clk_force_update_ctrl(void *handle)
 	return rc;
 }
 
-int dsi_display_clk_ctrl(void *handle,
-	enum dsi_clk_type clk_type, enum dsi_clk_state clk_state)
+int dsi_display_clk_ctrl(void *handle, u32 clk_type, u32 clk_state)
 {
 	int rc = 0;
 
@@ -5057,23 +5136,6 @@ error:
 	return rc;
 }
 
-static ssize_t sysfs_fod_ui_read(struct device *dev,
-	struct device_attribute *attr, char *buf)
-{
-	struct dsi_display *display;
-	bool status;
-
-	display = dev_get_drvdata(dev);
-	if (!display) {
-		pr_debug("Invalid display\n");
-		return -EINVAL;
-	}
-
-	status = atomic_read(&display->fod_ui);
-
-	return snprintf(buf, PAGE_SIZE, "%d\n", status);
-}
-
 static ssize_t sysfs_hbm_read(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
@@ -5092,6 +5154,9 @@ static ssize_t sysfs_hbm_write(struct device *dev,
 
 	if (!display->panel)
 		return -EINVAL;
+
+        if (display->panel->bl_config.bl_level > 2047)
+                return count;
 
 	ret = kstrtoint(buf, 10, &hbm_mode);
 	if (ret) {
@@ -5129,16 +5194,11 @@ error:
 	return ret == 0 ? count : ret;
 }
 
-static DEVICE_ATTR(fod_ui, 0444,
-			sysfs_fod_ui_read,
-			NULL);
-
 static DEVICE_ATTR(hbm, 0644,
 			sysfs_hbm_read,
 			sysfs_hbm_write);
 
 static struct attribute *display_fs_attrs[] = {
-	&dev_attr_fod_ui.attr,
 	&dev_attr_hbm.attr,
 	NULL,
 };
@@ -5173,13 +5233,6 @@ static int dsi_display_sysfs_deinit(struct dsi_display *display)
 
 	return 0;
 
-}
-
-void dsi_display_set_fod_ui(struct dsi_display *display, bool status)
-{
-	struct device *dev = &display->pdev->dev;
-	atomic_set(&display->fod_ui, status);
-	sysfs_notify(&dev->kobj, NULL, "fod_ui");
 }
 
 /**
@@ -5474,7 +5527,6 @@ static void dsi_display_unbind(struct device *dev,
 	}
 
 	atomic_set(&display->clkrate_change_pending, 0);
-	atomic_set(&display->fod_ui, false);
 	(void)dsi_display_sysfs_deinit(display);
 	(void)dsi_display_debugfs_deinit(display);
 
@@ -6200,7 +6252,10 @@ int dsi_display_get_info(struct drm_connector *connector,
 	info->max_width = 1920;
 	info->max_height = 1080;
 	info->qsync_min_fps =
-		display->panel->qsync_min_fps;
+		display->panel->qsync_caps.qsync_min_fps;
+	info->has_qsync_min_fps_list =
+		(display->panel->qsync_caps.qsync_min_fps_list_len > 0) ?
+		true : false;
 
 	switch (display->panel->panel_mode) {
 	case DSI_OP_VIDEO_MODE:
@@ -6607,6 +6662,24 @@ int dsi_display_get_panel_vfp(void *dsi_display,
 	mutex_unlock(&display->display_lock);
 
 	return rc;
+}
+
+int dsi_display_get_qsync_min_fps(void *display_dsi, u32 mode_fps)
+{
+	struct dsi_display *display = (struct dsi_display *)display_dsi;
+	struct dsi_panel *panel;
+	u32 i;
+
+	if (display == NULL || display->panel == NULL)
+		return -EINVAL;
+
+	panel = display->panel;
+	for (i = 0; i < panel->dfps_caps.dfps_list_len; i++) {
+		if (panel->dfps_caps.dfps_list[i] == mode_fps)
+			return panel->qsync_caps.qsync_min_fps_list[i];
+	}
+	SDE_EVT32(mode_fps);
+	return -EINVAL;
 }
 
 int dsi_display_find_mode(struct dsi_display *display,
@@ -7053,7 +7126,7 @@ static void dsi_display_handle_fifo_overflow(struct work_struct *work)
 	 * Add sufficient delay to make sure
 	 * pixel transmission has started
 	 */
-	usleep_range(190, 210);
+	usleep_range(180, 220);
 end:
 	dsi_display_clk_ctrl(display->dsi_clk_handle,
 			DSI_ALL_CLKS, DSI_CLK_OFF);
@@ -7131,7 +7204,7 @@ static void dsi_display_handle_lp_rx_timeout(struct work_struct *work)
 	 * Add sufficient delay to make sure
 	 * pixel transmission as started
 	 */
-	udelay(200);
+	usleep_range(180, 220);
 
 end:
 	dsi_display_clk_ctrl(display->dsi_clk_handle,
@@ -7247,8 +7320,21 @@ int dsi_display_prepare(struct dsi_display *display)
 
 	if (mode->dsi_mode_flags & DSI_MODE_FLAG_DMS) {
 		if (display->is_cont_splash_enabled) {
-			pr_debug("DMS is not supposed to be set on first frame\n");
-			rc = -EINVAL;
+			pr_err("DMS is not supposed to be set on first frame, "
+			       "%s\n",
+			       display->config.panel_mode == DSI_OP_CMD_MODE ?
+			       "but command mode can handle it. Let's go!" :
+			       "video mode cannot handle it. Bailing out.");
+			if (display->config.panel_mode == DSI_OP_VIDEO_MODE) {
+				rc = -EINVAL;
+				goto error;
+			}
+		} else {
+			/* update dsi ctrl for new mode */
+			rc = dsi_display_pre_switch(display);
+			if (rc)
+				pr_err("[%s] panel pre-prepare-res-switch failed, rc=%d\n",
+						display->name, rc);
 			goto error;
 		}
 		/* update dsi ctrl for new mode */
@@ -7438,7 +7524,7 @@ static int dsi_display_qsync(struct dsi_display *display, bool enable)
 	int i;
 	int rc = 0;
 
-	if (!display->panel->qsync_min_fps) {
+	if (!display->panel->qsync_caps.qsync_min_fps) {
 		pr_debug("%s:ERROR: qsync set, but no fps\n", __func__);
 		return 0;
 	}
@@ -7467,7 +7553,7 @@ static int dsi_display_qsync(struct dsi_display *display, bool enable)
 	}
 
 exit:
-	SDE_EVT32(enable, display->panel->qsync_min_fps, rc);
+	SDE_EVT32(enable, display->panel->qsync_caps.qsync_min_fps, rc);
 	mutex_unlock(&display->display_lock);
 	return rc;
 }
@@ -7675,6 +7761,46 @@ int dsi_display_enable(struct dsi_display *display)
 
 		display->panel->panel_initialized = true;
 		pr_debug("cont splash enabled, display enable not required\n");
+
+		/*
+		 * Start re-setting during continuous splash to perform mode
+		 * set before the first frame, if requested by the DT
+		 * configuration property
+		 */
+		mode = display->panel->cur_mode;
+		if (!(mode->dsi_mode_flags & DSI_MODE_FLAG_DMS))
+			return 0;
+
+		/*
+		 * At this point the panel is ON from bootloader (displaying
+		 * the splash screen) and the Command Mode Engine is also up:
+		 * send the commands to switch the resolution NOW!
+		 */
+		pr_info("[%s] Dynamic Mode Setting: switching now!\n",
+			display->name);
+		rc = dsi_panel_post_switch(display->panel);
+		if (rc)
+			pr_warn("[%s] Cannot send post-switch cmd: %d\n",
+				display->name, rc);
+
+		/* If Display Stream Compression is required, update params. */
+		if (mode->priv_info->dsc_enabled) {
+			mode->priv_info->dsc.pic_width *= display->ctrl_count;
+			rc = dsi_panel_update_pps(display->panel);
+			if (rc)
+				pr_warn("[%s] Cannot update PPS: %d\n",
+					display->name, rc);
+		}
+
+		rc = dsi_panel_switch(display->panel);
+		if (rc) {
+			pr_err("[%s] CRITICAL: Cannot switch resolution: "
+			       "rc = %d - Returning failure and "
+			       "hoping for DSI recovery...\n",
+				display->name, rc);
+			return rc;
+		}
+
 		return 0;
 	}
 

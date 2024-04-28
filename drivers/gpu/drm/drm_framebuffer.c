@@ -163,7 +163,7 @@ static int framebuffer_check(struct drm_device *dev,
 	/* check if the format is supported at all */
 	info = __drm_format_info(r->pixel_format & ~DRM_FORMAT_BIG_ENDIAN);
 	if (!info) {
-		struct drm_format_name_buf format_name;
+		__maybe_unused struct drm_format_name_buf format_name;
 		DRM_DEBUG_KMS("bad framebuffer format %s\n",
 		              drm_get_format_name(r->pixel_format,
 		                                  &format_name));
@@ -534,7 +534,7 @@ int drm_mode_dirtyfb_ioctl(struct drm_device *dev,
 	struct drm_framebuffer *fb;
 	unsigned flags;
 	int num_clips;
-	int ret;
+	int ret = 0;
 
 	if (!drm_core_check_feature(dev, DRIVER_MODESET))
 		return -EINVAL;

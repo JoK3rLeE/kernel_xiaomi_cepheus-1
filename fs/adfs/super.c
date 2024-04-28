@@ -231,8 +231,7 @@ static int adfs_statfs(struct dentry *dentry, struct kstatfs *buf)
 	buf->f_bavail  =
 	buf->f_bfree   = adfs_map_free(sb);
 	buf->f_ffree   = (long)(buf->f_bfree * buf->f_files) / (long)buf->f_blocks;
-	buf->f_fsid.val[0] = (u32)id;
-	buf->f_fsid.val[1] = (u32)(id >> 32);
+	buf->f_fsid    = u64_to_fsid(id);
 
 	return 0;
 }
@@ -313,7 +312,7 @@ static struct adfs_discmap *adfs_read_map(struct super_block *sb, struct adfs_di
 
 	asb->s_ids_per_zone = zone_size / (asb->s_idlen + 1);
 
-	dm = kmalloc(nzones * sizeof(*dm), GFP_KERNEL);
+	dm = kmalloc_array(nzones, sizeof(*dm), GFP_KERNEL);
 	if (dm == NULL) {
 		adfs_error(sb, "not enough memory");
 		return ERR_PTR(-ENOMEM);

@@ -50,6 +50,7 @@
 #include <linux/audit.h>
 #include <linux/mutex.h>
 #include <linux/selinux.h>
+#include <linux/flex_array.h>
 #include <linux/vmalloc.h>
 #include <net/netlabel.h>
 
@@ -545,13 +546,15 @@ static void type_attribute_bounds_av(struct policydb *policydb,
 	struct type_datum *target;
 	u32 masked = 0;
 
-	source = policydb->type_val_to_struct_array[scontext->type - 1];
+	source = flex_array_get_ptr(policydb->type_val_to_struct_array,
+				    scontext->type - 1);
 	BUG_ON(!source);
 
 	if (!source->bounds)
 		return;
 
-	target = policydb->type_val_to_struct_array[tcontext->type - 1];
+	target = flex_array_get_ptr(policydb->type_val_to_struct_array,
+				    tcontext->type - 1);
 	BUG_ON(!target);
 
 	memset(&lo_avd, 0, sizeof(lo_avd));
@@ -651,9 +654,11 @@ static void context_struct_compute_av(struct policydb *policydb,
 	 */
 	avkey.target_class = tclass;
 	avkey.specified = AVTAB_AV | AVTAB_XPERMS;
-	sattr = &policydb->type_attr_map_array[scontext->type - 1];
+	sattr = flex_array_get(policydb->type_attr_map_array,
+			       scontext->type - 1);
 	BUG_ON(!sattr);
-	tattr = &policydb->type_attr_map_array[tcontext->type - 1];
+	tattr = flex_array_get(policydb->type_attr_map_array,
+			       tcontext->type - 1);
 	BUG_ON(!tattr);
 	ebitmap_for_each_positive_bit(sattr, snode, i) {
 		ebitmap_for_each_positive_bit(tattr, tnode, j) {
@@ -896,7 +901,8 @@ int security_bounded_transition(struct selinux_state *state,
 
 	index = new_context->type;
 	while (true) {
-		type = policydb->type_val_to_struct_array[index - 1];
+		type = flex_array_get_ptr(policydb->type_val_to_struct_array,
+					  index - 1);
 		BUG_ON(!type);
 
 		/* not bounded anymore */
@@ -1059,9 +1065,11 @@ void security_compute_xperms_decision(struct selinux_state *state,
 
 	avkey.target_class = tclass;
 	avkey.specified = AVTAB_XPERMS;
-	sattr = &policydb->type_attr_map_array[scontext->type - 1];
+	sattr = flex_array_get(policydb->type_attr_map_array,
+				scontext->type - 1);
 	BUG_ON(!sattr);
-	tattr = &policydb->type_attr_map_array[tcontext->type - 1];
+	tattr = flex_array_get(policydb->type_attr_map_array,
+				tcontext->type - 1);
 	BUG_ON(!tattr);
 	ebitmap_for_each_positive_bit(sattr, snode, i) {
 		ebitmap_for_each_positive_bit(tattr, tnode, j) {
@@ -1486,6 +1494,8 @@ static int security_context_to_sid_core(struct selinux_state *state,
 {
 	struct policydb *policydb;
 	struct sidtab *sidtab;
+	char scontext2_onstack[SZ_128] __aligned(sizeof(long));
+	char str_onstack[SZ_128] __aligned(sizeof(long));
 	char *scontext2, *str = NULL;
 	struct context context;
 	int rc = 0;
@@ -1495,9 +1505,15 @@ static int security_context_to_sid_core(struct selinux_state *state,
 		return -EINVAL;
 
 	/* Copy the string to allow changes and ensure a NUL terminator */
-	scontext2 = kmemdup_nul(scontext, scontext_len, gfp_flags);
-	if (!scontext2)
-		return -ENOMEM;
+	if (scontext_len < sizeof(scontext2_onstack)) {
+		scontext2 = scontext2_onstack;
+		memcpy(scontext2, scontext, scontext_len);
+		scontext2[scontext_len] = '\0';
+	} else {
+		scontext2 = kmemdup_nul(scontext, scontext_len, gfp_flags);
+		if (!scontext2)
+			return -ENOMEM;
+	}
 
 	if (!state->initialized) {
 		int i;
@@ -1515,10 +1531,16 @@ static int security_context_to_sid_core(struct selinux_state *state,
 
 	if (force) {
 		/* Save another copy for storing in uninterpreted form */
-		rc = -ENOMEM;
-		str = kstrdup(scontext2, gfp_flags);
-		if (!str)
-			goto out;
+		if (scontext2 == scontext2_onstack) {
+			str = str_onstack;
+			memcpy(str, scontext2, scontext_len + 1);
+		} else {
+			str = kstrdup(scontext2, gfp_flags);
+			if (!str) {
+				rc = -ENOMEM;
+				goto out;
+			}
+		}
 	}
 	read_lock(&state->ss->policy_rwlock);
 	policydb = &state->ss->policydb;
@@ -1527,17 +1549,23 @@ static int security_context_to_sid_core(struct selinux_state *state,
 				      &context, def_sid);
 	if (rc == -EINVAL && force) {
 		context.str = str;
-		context.len = strlen(str) + 1;
+		context.len = scontext_len + 1;
 		str = NULL;
 	} else if (rc)
 		goto out_unlock;
 	rc = context_struct_to_sid(state, &context, sid);
+
+	if (context.str == str_onstack)
+		context.str = NULL;
+
 	context_destroy(&context);
 out_unlock:
 	read_unlock(&state->ss->policy_rwlock);
 out:
-	kfree(scontext2);
-	kfree(str);
+	if (scontext2 != scontext2_onstack) {
+		kfree(scontext2);
+		kfree(str);
+	}
 	return rc;
 }
 
@@ -2131,7 +2159,7 @@ int security_load_policy(struct selinux_state *state, void *data, size_t len)
 	int rc = 0;
 	struct policy_file file = { data, len }, *fp = &file;
 
-	oldpolicydb = kzalloc(2 * sizeof(*oldpolicydb), GFP_KERNEL);
+	oldpolicydb = kcalloc(2, sizeof(*oldpolicydb), GFP_KERNEL);
 	if (!oldpolicydb) {
 		rc = -ENOMEM;
 		goto out;
@@ -2831,13 +2859,6 @@ int security_get_bools(struct selinux_state *state,
 	struct policydb *policydb;
 	int i, rc;
 
-	if (!state->initialized) {
-		*len = 0;
-		*names = NULL;
-		*values = NULL;
-		return 0;
-	}
-
 	read_lock(&state->ss->policy_rwlock);
 
 	policydb = &state->ss->policydb;
@@ -3170,12 +3191,6 @@ int security_get_classes(struct selinux_state *state,
 {
 	struct policydb *policydb = &state->ss->policydb;
 	int rc;
-
-	if (!state->initialized) {
-		*nclasses = 0;
-		*classes = NULL;
-		return 0;
-	}
 
 	read_lock(&state->ss->policy_rwlock);
 

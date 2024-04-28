@@ -780,7 +780,8 @@ static int blkif_queue_rw_req(struct request *req, struct blkfront_ring_info *ri
 		ring_req->u.rw.handle = info->handle;
 		ring_req->operation = rq_data_dir(req) ?
 			BLKIF_OP_WRITE : BLKIF_OP_READ;
-		if (req_op(req) == REQ_OP_FLUSH || req->cmd_flags & REQ_FUA) {
+		if (req_op(req) == REQ_OP_FLUSH ||
+		    (req_op(req) == REQ_OP_WRITE && (req->cmd_flags & REQ_FUA))) {
 			/*
 			 * Ideally we can do an unordered flush-to-disk.
 			 * In case the backend onlysupports barriers, use that.
@@ -1980,7 +1981,9 @@ static int negotiate_mq(struct blkfront_info *info)
 	if (!info->nr_rings)
 		info->nr_rings = 1;
 
-	info->rinfo = kzalloc(sizeof(struct blkfront_ring_info) * info->nr_rings, GFP_KERNEL);
+	info->rinfo = kcalloc(info->nr_rings,
+			      sizeof(struct blkfront_ring_info),
+			      GFP_KERNEL);
 	if (!info->rinfo) {
 		xenbus_dev_fatal(info->xbdev, -ENOMEM, "allocating ring_info structure");
 		info->nr_rings = 0;
@@ -2285,15 +2288,16 @@ static int blkfront_setup_indirect(struct blkfront_ring_info *rinfo)
 	}
 
 	for (i = 0; i < BLK_RING_SIZE(info); i++) {
-		rinfo->shadow[i].grants_used = kzalloc(
-			sizeof(rinfo->shadow[i].grants_used[0]) * grants,
-			GFP_NOIO);
-		rinfo->shadow[i].sg = kzalloc(sizeof(rinfo->shadow[i].sg[0]) * psegs, GFP_NOIO);
+		rinfo->shadow[i].grants_used = kcalloc(grants,
+						       sizeof(rinfo->shadow[i].grants_used[0]),
+						       GFP_NOIO);
+		rinfo->shadow[i].sg = kcalloc(psegs,
+					      sizeof(rinfo->shadow[i].sg[0]),
+					      GFP_NOIO);
 		if (info->max_indirect_segments)
-			rinfo->shadow[i].indirect_grants = kzalloc(
-				sizeof(rinfo->shadow[i].indirect_grants[0]) *
-				INDIRECT_GREFS(grants),
-				GFP_NOIO);
+			rinfo->shadow[i].indirect_grants = kcalloc(INDIRECT_GREFS(grants),
+								   sizeof(rinfo->shadow[i].indirect_grants[0]),
+								   GFP_NOIO);
 		if ((rinfo->shadow[i].grants_used == NULL) ||
 			(rinfo->shadow[i].sg == NULL) ||
 		     (info->max_indirect_segments &&

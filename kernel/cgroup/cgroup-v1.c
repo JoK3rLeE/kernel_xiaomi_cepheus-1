@@ -198,9 +198,9 @@ struct cgroup_pidlist {
 static void *pidlist_allocate(int count)
 {
 	if (PIDLIST_TOO_LARGE(count))
-		return vmalloc(count * sizeof(pid_t));
+		return vmalloc(array_size(count, sizeof(pid_t)));
 	else
-		return kmalloc(count * sizeof(pid_t), GFP_KERNEL);
+		return kmalloc_array(count, sizeof(pid_t), GFP_KERNEL);
 }
 
 static void pidlist_free(void *p)
@@ -379,10 +379,9 @@ static int pidlist_array_load(struct cgroup *cgrp, enum cgroup_filetype type,
 	}
 	css_task_iter_end(&it);
 	length = n;
-	/* now sort & (if procs) strip out duplicates */
+	/* now sort & strip out duplicates (tgids or recycled thread PIDs) */
 	sort(array, length, sizeof(pid_t), cmppid, NULL);
-	if (type == CGROUP_FILE_PROCS)
-		length = pidlist_uniq(array, length);
+	length = pidlist_uniq(array, length);
 
 	l = cgroup_pidlist_find_create(cgrp, type);
 	if (!l) {

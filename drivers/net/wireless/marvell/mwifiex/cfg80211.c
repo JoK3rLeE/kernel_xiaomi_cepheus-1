@@ -1940,6 +1940,8 @@ static int mwifiex_cfg80211_start_ap(struct wiphy *wiphy,
 
 	mwifiex_set_sys_config_invalid_data(bss_cfg);
 
+	memcpy(bss_cfg->mac_addr, priv->curr_addr, ETH_ALEN);
+
 	if (params->beacon_interval)
 		bss_cfg->beacon_period = params->beacon_interval;
 	if (params->dtim_period)
@@ -4210,8 +4212,7 @@ int mwifiex_init_channel_scan_gap(struct mwifiex_adapter *adapter)
 		n_channels_a = mwifiex_band_5ghz.n_channels;
 
 	adapter->num_in_chan_stats = n_channels_bg + n_channels_a;
-	adapter->chan_stats = vmalloc(sizeof(*adapter->chan_stats) *
-				      adapter->num_in_chan_stats);
+	adapter->chan_stats = vmalloc(array_size(sizeof(*adapter->chan_stats), adapter->num_in_chan_stats));
 
 	if (!adapter->chan_stats)
 		return -ENOMEM;

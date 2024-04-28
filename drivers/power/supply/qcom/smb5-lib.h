@@ -217,6 +217,7 @@ enum print_reason {
 #else
 #define DCP_CURRENT_UA                  1600000
 #endif
+#define DCP_CURRENT_UA			2000000
 #define HVDCP_CURRENT_UA		2800000
 #define HVDCP_CLASS_B_CURRENT_UA		3100000
 #define HVDCP_START_CURRENT_UA_FOR_BQ	500000

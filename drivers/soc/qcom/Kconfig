@@ -290,7 +290,7 @@ config QCOM_WATCHDOG_V2
 
 config QCOM_FORCE_WDOG_BITE_ON_PANIC
 	bool "QCOM force watchdog bite"
-	depends on QCOM_WATCHDOG_V2
+	depends on QCOM_WATCHDOG_V2 && !PREEMPT_RT_FULL
 	help
 	  This forces a watchdog bite when the device restarts due to a
 	  kernel panic. On certain MSM SoCs, this provides us
@@ -749,6 +749,13 @@ config MSM_JTAGV8
 	  and ETM registers are saved and restored across power collapse.
 	  If unsure, say 'N' here to avoid potential power, performance and
 	  memory penalty.
+
+config SMP2P_SLEEPSTATE_TIME
+	int "SMP2P Sleepstate Timeout"
+	default 200
+	depends on QCOM_SMP2P
+	help
+	  This option allows modifying smp2p sleepstate wakeup time.
 
 config QCOM_QDSS_BRIDGE
 	bool "Configure bridge driver for QTI/Qualcomm Technologies, Inc. MDM"

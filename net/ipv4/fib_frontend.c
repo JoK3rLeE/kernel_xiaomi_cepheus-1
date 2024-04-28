@@ -529,6 +529,9 @@ static int rtentry_to_fib_config(struct net *net, int cmd, struct rtentry *rt,
 			cfg->fc_scope = RT_SCOPE_UNIVERSE;
 	}
 
+	if (!cfg->fc_table)
+		cfg->fc_table = RT_TABLE_MAIN;
+
 	if (cmd == SIOCDELRT)
 		return 0;
 
@@ -542,7 +545,7 @@ static int rtentry_to_fib_config(struct net *net, int cmd, struct rtentry *rt,
 		struct nlattr *mx;
 		int len = 0;
 
-		mx = kzalloc(3 * nla_total_size(4), GFP_KERNEL);
+		mx = kcalloc(3, nla_total_size(4), GFP_KERNEL);
 		if (!mx)
 			return -ENOMEM;
 

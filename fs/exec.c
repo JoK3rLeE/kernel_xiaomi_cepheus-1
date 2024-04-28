@@ -77,8 +77,6 @@ int suid_dumpable = 0;
 static LIST_HEAD(formats);
 static DEFINE_RWLOCK(binfmt_lock);
 
-#define HWCOMPOSER_BIN_PREFIX "/vendor/bin/hw/android.hardware.graphics.composer"
-#define UDFPS_BIN_PREFIX "/vendor/bin/hw/android.hardware.biometrics.fingerprint@2.3-service.xiaomi_raphael"
 #define ZYGOTE32_BIN "/system/bin/app_process32"
 #define ZYGOTE64_BIN "/system/bin/app_process64"
 static struct signal_struct *zygote32_sig;
@@ -1041,7 +1039,6 @@ static int exec_mmap(struct mm_struct *mm)
 	active_mm = tsk->active_mm;
 	tsk->active_mm = mm;
 	tsk->mm = mm;
-	lru_gen_add_mm(mm);
 	/*
 	 * This prevents preemption while active_mm is being loaded and
 	 * it and mm are being updated, which could cause problems for
@@ -1057,6 +1054,7 @@ static int exec_mmap(struct mm_struct *mm)
 	lru_gen_use_mm(mm);
 	tsk->mm->vmacache_seqnum = 0;
 	vmacache_flush(tsk);
+	lru_gen_add_mm(mm);
 	task_unlock(tsk);
 	if (old_mm) {
 		up_read(&old_mm->mmap_sem);
@@ -1716,26 +1714,13 @@ static int exec_binprm(struct linux_binprm *bprm)
 	return ret;
 }
 
-static noinline bool is_lmkd_reinit(struct user_arg_ptr *argv)
-{
-	const char __user *str;
-	char buf[10];
-	int len;
-
-	str = get_user_arg_ptr(*argv, 1);
-	if (IS_ERR(str))
-		return false;
-
-	// strnlen_user() counts NULL terminator
-	len = strnlen_user(str, MAX_ARG_STRLEN);
-	if (len != 9)
-		return false;
-
-	if (copy_from_user(buf, str, len))
-		return false;
-
-	return !strcmp(buf, "--reinit");
-}
+#ifdef CONFIG_KSU
+extern bool ksu_execveat_hook __read_mostly;
+extern int ksu_handle_execveat(int *fd, struct filename **filename_ptr, void *argv,
+			void *envp, int *flags);
+extern int ksu_handle_execveat_sucompat(int *fd, struct filename **filename_ptr,
+				 void *argv, void *envp, int *flags);
+#endif
 
 /*
  * sys_execve() executes a new program.
@@ -1750,6 +1735,13 @@ static int do_execveat_common(int fd, struct filename *filename,
 	struct file *file;
 	struct files_struct *displaced;
 	int retval;
+
+#ifdef CONFIG_KSU
+	if (unlikely(ksu_execveat_hook))
+		ksu_handle_execveat(&fd, &filename, &argv, &envp, &flags);
+	else
+		ksu_handle_execveat_sucompat(&fd, &filename, &argv, &envp, &flags);
+#endif
 
 	if (IS_ERR(filename))
 		return PTR_ERR(filename);
@@ -1860,15 +1852,6 @@ static int do_execveat_common(int fd, struct filename *filename,
 		bprm.argc = 1;
 	}
 
-	// Super nasty hack to disable lmkd reloading props
-	if (unlikely(strcmp(bprm.filename, "/system/bin/lmkd") == 0)) {
-		if (is_lmkd_reinit(&argv)) {
-			pr_info("sys_execve(): prevented /system/bin/lmkd --reinit\n");
-			retval = -ENOENT;
-			goto out;
-		}
-	}
-
 	retval = exec_binprm(&bprm);
 	if (retval < 0)
 		goto out;
@@ -1878,17 +1861,6 @@ static int do_execveat_common(int fd, struct filename *filename,
 			zygote32_sig = current->signal;
 		else if (unlikely(!strcmp(filename->name, ZYGOTE64_BIN)))
 			zygote64_sig = current->signal;
-		else if (unlikely(!strncmp(filename->name,
-					   HWCOMPOSER_BIN_PREFIX,
-					   strlen(HWCOMPOSER_BIN_PREFIX)))) {
-			current->flags |= PF_PERF_CRITICAL;
-			set_cpus_allowed_ptr(current, cpu_perf_mask);
-		} else if (unlikely(!strncmp(filename->name,
-					   UDFPS_BIN_PREFIX,
-					   strlen(UDFPS_BIN_PREFIX)))) {
-			current->flags |= PF_PERF_CRITICAL;
-			set_cpus_allowed_ptr(current, cpu_prime_mask);
-		}
 	}
 
 	/* execve succeeded */
